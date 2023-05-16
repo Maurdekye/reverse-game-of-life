@@ -8,7 +8,7 @@ enum CellState {
 }
 
 // Define the fixed width and height for the 2D array
-const SIZE: usize = 10;
+const SIZE: usize = 5;
 const DIM: i32 = SIZE as i32;
 
 // Create a type alias for the 2D array
@@ -72,28 +72,28 @@ fn to_str(grid: &LifeGrid) -> String {
     grid_str
 }
 
-// fn to_str_marked(grid: &LifeGrid, mx: usize, my: usize) -> String {
-//     let mut grid_str = format!("+{}+\n", "-".repeat(SIZE * 2 + 1));
-//     for (x, row) in grid.iter().enumerate() {
-//         grid_str.push('|');
-//         grid_str.push(' ');
-//         for (y, cell) in row.iter().enumerate() {
-//             grid_str.push(if x == mx && y == my {
-//                 'O'
-//             } else {
-//                 match cell {
-//                     CellState::Dead => ' ',
-//                     CellState::Alive => '#',
-//                     CellState::Undetermined => '~',
-//                 }
-//             });
-//             grid_str.push(' ');
-//         }
-//         grid_str.push_str("|\n");
-//     }
-//     grid_str.push_str(format!("+{}+", "-".repeat(SIZE * 2 + 1)).as_str());
-//     grid_str
-// }
+fn to_str_marked(grid: &LifeGrid, mx: usize, my: usize) -> String {
+    let mut grid_str = format!("+{}+\n", "-".repeat(SIZE * 2 + 1));
+    for (x, row) in grid.iter().enumerate() {
+        grid_str.push('|');
+        grid_str.push(' ');
+        for (y, cell) in row.iter().enumerate() {
+            grid_str.push(if x == mx && y == my {
+                'O'
+            } else {
+                match cell {
+                    CellState::Dead => ' ',
+                    CellState::Alive => '#',
+                    CellState::Undetermined => '~',
+                }
+            });
+            grid_str.push(' ');
+        }
+        grid_str.push_str("|\n");
+    }
+    grid_str.push_str(format!("+{}+", "-".repeat(SIZE * 2 + 1)).as_str());
+    grid_str
+}
 
 fn print_life_grid(grid: &LifeGrid) {
     print_life_grids(&[grid]);
@@ -113,13 +113,22 @@ fn print_grid_grid(grids: &Vec<&LifeGrid>, width: usize) {
     }
 }
 
-fn count_adjacent_cells(grid: &LifeGrid, x: &i32, y: &i32) -> Range<i32> {
+fn count_adjacent_cells(grid: &LifeGrid, x: &i32, y: &i32, wrap: bool) -> Range<i32> {
     let (mut min_total, mut max_total) = (0, 0);
     for dx in -1..=1 {
         for dy in -1..=1 {
             if !(dx == 0 && dy == 0) {
-                let (nx, ny) = ((x + dx + DIM) % DIM, (y + dy + DIM) % DIM);
-                let cell_value = grid[nx as usize][ny as usize];
+
+                let (nx, ny) = (x + dx, y + dy);
+                let cell_value = if wrap {
+                    grid[((nx + DIM) % DIM) as usize][((ny + DIM) % DIM) as usize]
+                } else {
+                    if  nx < 0 || ny < 0 || nx >= DIM || ny >= DIM {
+                        CellState::Dead
+                    } else {
+                        grid[nx as usize][ny as usize]
+                    }
+                };
                 let (min_add, max_add) = match cell_value {
                     CellState::Alive => (1, 1),
                     CellState::Undetermined => (0, 1),
@@ -133,11 +142,13 @@ fn count_adjacent_cells(grid: &LifeGrid, x: &i32, y: &i32) -> Range<i32> {
     min_total..max_total
 }
 
-fn simulate_grid(grid: &LifeGrid) -> LifeGrid {
+fn simulate_grid(grid: &LifeGrid, wrap: bool) -> LifeGrid {
     let mut next_grid = [[CellState::Undetermined; SIZE]; SIZE];
     for x in 0..SIZE {
         for y in 0..SIZE {
-            let count_range = count_adjacent_cells(grid, &(x as i32), &(y as i32));
+            let count_range = count_adjacent_cells(grid, &(x as i32), &(y as i32), wrap);
+            // println!("{}", adjoin(to_str(&grid), adjoin(to_str(&next_grid), to_str_marked(&next_grid, x, y))));
+            // println!("");
             next_grid[x][y] = match grid[x][y] {
                 CellState::Alive => {
                     if superset(&(2..3), &count_range) {
@@ -190,15 +201,17 @@ fn is_consistent(grid_a: &LifeGrid, grid_b: &LifeGrid) -> bool {
     }
 }
 
-fn explore_possible_prior_grids(present_grid: &LifeGrid) -> Vec<LifeGrid> {
-    let mut stack = Vec::new();
+fn explore_possible_prior_grids(present_grid: &LifeGrid, skip_lonely_cells: bool, wrap: bool) -> Vec<LifeGrid> {
+    let mut stack: Vec<(LifeGrid, i32, i32)> = Vec::new();
     stack.push(([[CellState::Undetermined; SIZE]; SIZE], 0, 0));
     let mut results = Vec::new();
     let mut explored_grids = 0;
     while let Some((possible_past_grid, x, y)) = stack.pop() {
         explored_grids += 1;
-        let simulated_present_grid = simulate_grid(&possible_past_grid);
-
+        let simulated_present_grid = simulate_grid(&possible_past_grid, wrap);
+        // print_grid_grid(&stack.iter().map(|(g,_,_)| g).collect(), 20);
+        // println!("{}", adjoin(to_str(&present_grid), adjoin(to_str(&simulated_present_grid), adjoin(to_str(&possible_past_grid), to_str_marked(&possible_past_grid, x as usize, y as usize)))));
+        // println!("");
         if !is_consistent(&simulated_present_grid, present_grid) {
             continue;
         }
@@ -211,7 +224,7 @@ fn explore_possible_prior_grids(present_grid: &LifeGrid) -> Vec<LifeGrid> {
             }
         } else {
             let current_cell_present_state = present_grid[x as usize][y as usize];
-            let living_range = count_adjacent_cells(&possible_past_grid, &x, &y);
+            let living_range = count_adjacent_cells(&possible_past_grid, &x, &y, wrap);
             /*
              * If the current cell is alive:
              *  - it could only have been alive last step if it had either 2 or 3 living neighbors
@@ -222,8 +235,6 @@ fn explore_possible_prior_grids(present_grid: &LifeGrid) -> Vec<LifeGrid> {
              * also, don't check lonely cells to see if they could have been alive in the previous state
              */
 
-            let current_living_range = count_adjacent_cells(&present_grid, &x, &y);
-
             let check = match current_cell_present_state {
                 CellState::Alive => [
                     overlap(&living_range, &(2..3)),
@@ -231,7 +242,7 @@ fn explore_possible_prior_grids(present_grid: &LifeGrid) -> Vec<LifeGrid> {
                 ],
                 CellState::Dead => [
                     (overlap(&living_range, &(0..1)) || overlap(&living_range, &(4..8)))
-                        && current_living_range.end > 0,
+                        && (!skip_lonely_cells || count_adjacent_cells(&present_grid, &x, &y, wrap).end > 0),
                     true,
                 ],
                 CellState::Undetermined => [true, true],
@@ -256,11 +267,30 @@ fn explore_possible_prior_grids(present_grid: &LifeGrid) -> Vec<LifeGrid> {
 
 fn main() {
     let mut grid: LifeGrid = [[CellState::Dead; SIZE]; SIZE];
-    grid[4][5] = CellState::Alive;
-    grid[5][5] = CellState::Alive;
-    grid[6][5] = CellState::Alive;
+    let glider = &[
+        (0, 2),
+        (1, 0),
+        (1, 2),
+        (2, 1),
+        (2, 2)
+    ];
+    let glider_2 = &[
+        (0, 0),
+        (1, 1),
+        (1, 2),
+        (2, 0),
+        (2, 1)
+    ];
+    let oscillator = &[
+        (0, 0),
+        (0, 1),
+        (0, 2)
+    ];
+    for (x, y) in oscillator {
+        grid[*x+2][*y+1] = CellState::Alive
+    }
     println!("Starting grid:");
     print_life_grid(&grid);
-    let grids = explore_possible_prior_grids(&grid);
-    print_grid_grid(&grids.iter().collect::<Vec<&LifeGrid>>(), 12);
+    let grids = explore_possible_prior_grids(&grid, true, true);
+    print_grid_grid(&grids.iter().collect::<Vec<&LifeGrid>>(), 20);
 }
