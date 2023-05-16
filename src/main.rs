@@ -1,4 +1,6 @@
 use std::{ops::Range, usize};
+use rand::Rng;
+use rand::seq::SliceRandom;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum CellState {
@@ -8,7 +10,7 @@ enum CellState {
 }
 
 // Define the fixed width and height for the 2D array
-const SIZE: usize = 5;
+const SIZE: usize = 15;
 const DIM: i32 = SIZE as i32;
 
 // Create a type alias for the 2D array
@@ -201,7 +203,7 @@ fn is_consistent(grid_a: &LifeGrid, grid_b: &LifeGrid) -> bool {
     }
 }
 
-fn explore_possible_prior_grids(present_grid: &LifeGrid, skip_lonely_cells: bool, wrap: bool) -> Vec<LifeGrid> {
+fn explore_possible_prior_grids(present_grid: &LifeGrid, skip_lonely_cells: bool, wrap: bool, yield_amount: Option<usize>) -> Vec<LifeGrid> {
     let mut stack: Vec<(LifeGrid, i32, i32)> = Vec::new();
     stack.push(([[CellState::Undetermined; SIZE]; SIZE], 0, 0));
     let mut results = Vec::new();
@@ -218,6 +220,9 @@ fn explore_possible_prior_grids(present_grid: &LifeGrid, skip_lonely_cells: bool
         if y >= DIM {
             results.push(possible_past_grid);
             let num_results = results.len();
+            if yield_amount.map(|n| num_results >= n).unwrap_or(false) {
+                return results;
+            }
             if results.len() % 1000 == 0 {
                 print_life_grid(&possible_past_grid);
                 println!("{num_results} results, {explored_grids} total explored grids");
@@ -265,6 +270,24 @@ fn explore_possible_prior_grids(present_grid: &LifeGrid, skip_lonely_cells: bool
     results
 }
 
+fn sim_backwards(starting_grid: &LifeGrid, steps: i32) -> LifeGrid {
+    let mut rng = rand::thread_rng();
+    let mut back_sim = starting_grid.clone();
+    for i in 0..steps {
+        println!("Simulating step {i}");
+        let results = explore_possible_prior_grids(&back_sim, true, false, Some(1));
+        let new_state: Option<&LifeGrid> = results.as_slice().choose(&mut rng);
+        if new_state.is_none() {
+            println!("No further possible prior states!");
+            return back_sim;
+        } else {
+            back_sim = *new_state.unwrap();
+            print_life_grid(&back_sim);
+        }
+    }
+    back_sim
+}
+
 fn main() {
     let mut grid: LifeGrid = [[CellState::Dead; SIZE]; SIZE];
     let glider = &[
@@ -286,11 +309,12 @@ fn main() {
         (0, 1),
         (0, 2)
     ];
-    for (x, y) in oscillator {
-        grid[*x+2][*y+1] = CellState::Alive
+    for (x, y) in glider {
+        grid[*x+5][*y+5] = CellState::Alive
     }
     println!("Starting grid:");
     print_life_grid(&grid);
-    let grids = explore_possible_prior_grids(&grid, true, true);
-    print_grid_grid(&grids.iter().collect::<Vec<&LifeGrid>>(), 20);
+    let back_sim = sim_backwards(&grid,6);
+    // let grids = explore_possible_prior_grids(&grid, true, false);
+    // print_grid_grid(&grids.iter().collect::<Vec<&LifeGrid>>(), 100/DIM as usize);
 }
