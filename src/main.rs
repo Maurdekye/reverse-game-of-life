@@ -1,4 +1,4 @@
-use std::{cell::Cell, ops::Range, usize};
+use std::{ops::Range, usize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum CellState {
@@ -72,28 +72,28 @@ fn to_str(grid: &LifeGrid) -> String {
     grid_str
 }
 
-fn to_str_marked(grid: &LifeGrid, mx: usize, my: usize) -> String {
-    let mut grid_str = format!("+{}+\n", "-".repeat(SIZE * 2 + 1));
-    for (x, row) in grid.iter().enumerate() {
-        grid_str.push('|');
-        grid_str.push(' ');
-        for (y, cell) in row.iter().enumerate() {
-            grid_str.push(if x == mx && y == my {
-                'O'
-            } else {
-                match cell {
-                    CellState::Dead => ' ',
-                    CellState::Alive => '#',
-                    CellState::Undetermined => '~',
-                }
-            });
-            grid_str.push(' ');
-        }
-        grid_str.push_str("|\n");
-    }
-    grid_str.push_str(format!("+{}+", "-".repeat(SIZE * 2 + 1)).as_str());
-    grid_str
-}
+// fn to_str_marked(grid: &LifeGrid, mx: usize, my: usize) -> String {
+//     let mut grid_str = format!("+{}+\n", "-".repeat(SIZE * 2 + 1));
+//     for (x, row) in grid.iter().enumerate() {
+//         grid_str.push('|');
+//         grid_str.push(' ');
+//         for (y, cell) in row.iter().enumerate() {
+//             grid_str.push(if x == mx && y == my {
+//                 'O'
+//             } else {
+//                 match cell {
+//                     CellState::Dead => ' ',
+//                     CellState::Alive => '#',
+//                     CellState::Undetermined => '~',
+//                 }
+//             });
+//             grid_str.push(' ');
+//         }
+//         grid_str.push_str("|\n");
+//     }
+//     grid_str.push_str(format!("+{}+", "-".repeat(SIZE * 2 + 1)).as_str());
+//     grid_str
+// }
 
 fn print_life_grid(grid: &LifeGrid) {
     print_life_grids(&[grid]);
