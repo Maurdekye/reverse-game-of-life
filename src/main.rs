@@ -1,7 +1,7 @@
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
-use std::{ops::Range, usize, collections::VecDeque, cmp::Reverse};
+use std::{cmp::Reverse, collections::VecDeque, ops::Range, usize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum CellState {
@@ -99,18 +99,18 @@ fn to_str_marked(grid: &LifeGrid, mx: usize, my: usize) -> String {
 }
 
 fn print_life_grid(grid: &LifeGrid) {
-    print_life_grids(&[grid]);
+    print_life_grids(&[*grid]);
 }
 
-fn print_life_grids(grids: &[&LifeGrid]) {
-    let mut out_str: String = to_str(grids[0]);
+fn print_life_grids(grids: &[LifeGrid]) {
+    let mut out_str: String = to_str(&grids[0]);
     for grid in &grids[1..] {
         out_str = adjoin(out_str, to_str(grid));
     }
     println!("{}", out_str);
 }
 
-fn print_grid_grid(grids: &Vec<&LifeGrid>, width: usize) {
+fn print_grid_grid(grids: &Vec<LifeGrid>, width: usize) {
     for i in (0..grids.len()).step_by(width) {
         print_life_grids(&grids[i..((i + width).min(grids.len()))]);
     }
@@ -320,7 +320,7 @@ fn explore_possible_prior_grids_parallel(
                         ],
                         CellState::Undetermined => [true, true],
                     };
-                    
+
                     (0..2)
                         .filter(|i| {
                             if *i == 0 && shy_from_edges && at_edge {
@@ -352,6 +352,55 @@ fn explore_possible_prior_grids_parallel(
     stack
 }
 
+fn num_cells(grid: &LifeGrid) -> usize {
+    grid.iter()
+        .map(|r| r.iter().filter(|cell| **cell == CellState::Alive).count())
+        .sum::<usize>()
+}
+
+fn shape_radius(grid: &LifeGrid) -> usize {
+    let row_spans: Vec<(Option<usize>, Option<usize>)> = grid
+        .iter()
+        .map(|row| {
+            (
+                row.iter()
+                    .enumerate()
+                    .find(|(_, cell)| **cell == CellState::Alive)
+                    .map(|(n, _)| n),
+                row.iter()
+                    .enumerate()
+                    .rfind(|(_, cell)| **cell == CellState::Alive)
+                    .map(|(n, _)| n),
+            )
+        }).collect();
+    let width = match (
+        row_spans.iter().map(|(l, _)| l).filter_map(|x|*x).min(),
+        row_spans.iter().map(|(_, r)| r).filter_map(|x|*x).max(),
+    ) {
+        (Some(left), Some(right)) => right - left + 1,
+        _ => 0
+    };
+    let rows_with_cells: Vec<(usize, bool)> = grid
+        .iter()
+        .map(|row| row.iter().any(|cell| *cell == CellState::Alive))
+        .enumerate()
+        .collect();
+    let height = match (
+        rows_with_cells
+            .iter()
+            .find(|(_, flag)| *flag)
+            .map(|(n, _)| n),
+        rows_with_cells
+            .iter()
+            .rfind(|(_, flag)| *flag)
+            .map(|(n, _)| n),
+    ) {
+        (Some(top), Some(bottom)) => bottom - top + 1,
+        _ => 0,
+    };
+    width * height
+}
+
 fn sim_backwards(starting_grid: &LifeGrid, steps: usize) -> Option<LifeGrid> {
     let mut state_stack: Vec<Vec<LifeGrid>> = vec![vec![*starting_grid]];
     while state_stack.len() < steps {
@@ -360,16 +409,18 @@ fn sim_backwards(starting_grid: &LifeGrid, steps: usize) -> Option<LifeGrid> {
             None => {
                 println!("No more steps left");
                 return None;
-            },
+            }
             Some(mut grid_set) => {
                 let mut explored_all = true;
                 while !grid_set.is_empty() {
                     let grid = grid_set.pop().unwrap();
                     print_life_grid(&grid);
                     println!("Simulating step {step}");
-                    let mut results = explore_possible_prior_grids_parallel(&grid, true, false, true);
+                    let mut results =
+                        explore_possible_prior_grids_parallel(&grid, true, false, true);
                     if !results.is_empty() {
-                        results.sort_by_cached_key(|grid| Reverse(grid.iter().map(|r| r.iter().filter(|cell| **cell == CellState::Alive).count()).sum::<usize>()));
+                        results.sort_by_cached_key(|grid| Reverse(shape_radius(&grid)));
+                        // print_grid_grid(&results, 5);
                         state_stack.push(grid_set);
                         state_stack.push(results);
                         explored_all = false;
@@ -393,10 +444,10 @@ fn main() {
     let glider_2 = &[(0, 0), (1, 1), (1, 2), (2, 0), (2, 1)];
     let oscillator = &[(0, 0), (0, 1), (0, 2)];
     for (x, y) in glider {
-        grid[*x + 10][*y + 10] = CellState::Alive
+        grid[*x + 15][*y + 15] = CellState::Alive
     }
-    let back_sim = sim_backwards(&grid, 15).unwrap();
+    let back_sim = sim_backwards(&grid, 35).unwrap();
     print_life_grid(&back_sim);
     // let grids = explore_possible_prior_grids_parallel(&grid, true, false);
-    // print_grid_grid(&grids.iter().collect::<Vec<&LifeGrid>>(), 100/DIM as usize);
+    // print_grid_grid(&grids, 100/DIM as usize);
 }
