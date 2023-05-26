@@ -17,7 +17,7 @@ enum EdgeBehavior {
 }
 
 // Define the fixed width and height for the 2D array
-const SIZE: usize = 7;
+const SIZE: usize = 8;
 const DIM: i32 = SIZE as i32;
 
 // Create a type alias for the 2D array
@@ -310,12 +310,17 @@ fn explore_possible_prior_grids_parallel(
     present_grid: &LifeGrid,
     skip_lonely_cells: bool,
     edge_behavior: &EdgeBehavior,
+    progress: bool,
 ) -> Vec<LifeGrid> {
     let mut stack: Vec<LifeGrid> = Vec::new();
     stack.push([[CellState::Undetermined; SIZE]; SIZE]);
     let mut total_index: usize = 0;
-    let pbar = ProgressBar::new((SIZE * SIZE) as u64);
-    pbar.set_prefix("Evaluating");
+    let mut pbar = if progress {
+        Some(ProgressBar::new((SIZE * SIZE) as u64))
+    } else {
+        None
+    };
+    pbar.as_mut().map(|pbar| pbar.set_prefix("Evaluating"));
     while total_index < SIZE * SIZE {
         let (x, y) = (total_index % SIZE, total_index / SIZE);
         let at_edge = x == 0 || y == 0 || x == SIZE - 1 || y == SIZE - 1;
@@ -368,12 +373,12 @@ fn explore_possible_prior_grids_parallel(
         total_index += 1;
         let stack_len = stack.len();
         let max_index = DIM * DIM;
-        pbar.inc(1);
-        pbar.set_message(format!("{stack_len}\t{total_index}/{max_index}"));
+        pbar.as_mut().map(|pbar| pbar.inc(1));
+        pbar.as_mut().map(|pbar| pbar.set_message(format!("{stack_len}\t{total_index}/{max_index}")));
     }
 
     let total_results = stack.len();
-    pbar.finish_with_message(format!("{total_results} total results"));
+    pbar.as_mut().map(|pbar| pbar.finish_with_message(format!("{total_results} total results")));
     stack
 }
 
@@ -427,28 +432,75 @@ fn shape_radius(grid: &LifeGrid) -> usize {
     width * height
 }
 
+fn sim_backwards_parallel(
+    starting_grid: &LifeGrid,
+    steps: usize,
+    skip_lonely_cells: bool,
+    edge_behavior: &EdgeBehavior,
+) -> (Vec<LifeGrid>, usize) {
+    let mut stack: Vec<LifeGrid> = vec![*starting_grid];
+    let mut step = 0;
+    for _ in 0..steps {
+        let new_stack: Vec<LifeGrid> = stack
+            .par_iter()
+            .map(|grid| {
+                explore_possible_prior_grids_parallel(
+                    &grid,
+                    skip_lonely_cells,
+                    edge_behavior,
+                    false,
+                )
+            })
+            .flatten()
+            .collect();
+        let num_grids = stack.len();
+        println!("{num_grids} prior grids at step {step}");
+        if new_stack.is_empty() {
+            println!("Unable to find further grids");
+            break;
+        }
+        stack = new_stack;
+        step += 1;
+    }
+    stack.sort_by_cached_key(|grid| (num_cells(&grid), shape_radius(&grid)));
+    let num_grids = stack.len();
+    println!("There are {num_grids} grids at step {step}");
+    (stack, step)
+}
+
 fn sim_backwards(
     starting_grid: &LifeGrid,
     steps: usize,
     skip_lonely_cells: bool,
-    edge_behavior: &EdgeBehavior
-) -> Option<LifeGrid> {
+    edge_behavior: &EdgeBehavior,
+) -> (LifeGrid, usize) {
+    let mut best_grid = starting_grid.clone();
+    let mut furthest_step = 1;
     let mut state_stack: Vec<Vec<LifeGrid>> = vec![vec![*starting_grid]];
     while state_stack.len() < steps {
         let step = state_stack.len();
         match state_stack.pop() {
             None => {
-                println!("No more steps left");
-                return None;
+                // println!("No more steps left");
+                // println!("Returning furthest back grid found at step {furthest_step}");
+                return (best_grid, furthest_step);
             }
             Some(mut grid_set) => {
                 let mut explored_all = true;
                 while !grid_set.is_empty() {
                     let grid = grid_set.pop().unwrap();
-                    print_life_grid(&grid);
-                    println!("Simulating step {step}");
-                    let mut results =
-                        explore_possible_prior_grids_parallel(&grid, skip_lonely_cells, edge_behavior);
+                    if step > furthest_step {
+                        best_grid = grid.clone();
+                        furthest_step = step;
+                    }
+                    // print_life_grid(&grid);
+                    // println!("Simulating step {step}");
+                    let mut results = explore_possible_prior_grids_parallel(
+                        &grid,
+                        skip_lonely_cells,
+                        edge_behavior,
+                        false,
+                    );
                     if !results.is_empty() {
                         results.sort_by_cached_key(|grid| {
                             Reverse((num_cells(&grid), shape_radius(&grid)))
@@ -459,32 +511,29 @@ fn sim_backwards(
                         explored_all = false;
                         break;
                     } else {
-                        println!("No paths from the current grid!");
+                        // println!("No paths from the current grid!");
                     }
                 }
                 if explored_all {
-                    println!("No grids left at current step");
+                    // println!("No grids left at current step");
                 }
             }
         }
     }
-    Some(state_stack.pop().unwrap().pop().unwrap())
+    (state_stack.pop().unwrap().pop().unwrap(), steps)
 }
 
 fn main() {
     let mut grid: LifeGrid = [[CellState::Dead; SIZE]; SIZE];
     let glider = &[(0, 2), (1, 0), (1, 2), (2, 1), (2, 2)];
     let oscillator = &[(0, 0), (0, 1), (0, 2)];
-    let undeath = &[(0, 0), (0, 1)];
     let dot = &[(0, 0)];
     for (x, y) in dot {
         grid[*x + 3][*y + 3] = CellState::Alive
     }
-    let back_sim = sim_backwards(&grid, 8, true, &EdgeBehavior::Avoid);
-    match back_sim {
-        Some(end_grid) => print_life_grid(&end_grid),
-        None => println!("Unable to reach final backstep"),
-    }
+    let (back_sim, step_count) = sim_backwards_parallel(&grid, 10, true, &EdgeBehavior::Avoid);
+    println!("Grid at step {step_count}");
+    print_grid_grid(&back_sim, 100 / SIZE);
     // let grids = explore_possible_prior_grids_parallel(&grid, true, false);
     // print_grid_grid(&grids, 100/DIM as usize);
 }
