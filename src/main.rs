@@ -1,7 +1,6 @@
-use indicatif::{ProgressBar, ProgressStyle};
-use rand::seq::SliceRandom;
+use indicatif::ProgressBar;
 use rayon::prelude::*;
-use std::{cmp::Reverse, collections::VecDeque, ops::Range, usize};
+use std::{cmp::Reverse, num, ops::Range, usize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum CellState {
@@ -10,8 +9,15 @@ enum CellState {
     Undetermined,
 }
 
+#[derive(PartialEq, Eq)]
+enum EdgeBehavior {
+    Wrap,
+    Wall,
+    Avoid,
+}
+
 // Define the fixed width and height for the 2D array
-const SIZE: usize = 20;
+const SIZE: usize = 7;
 const DIM: i32 = SIZE as i32;
 
 // Create a type alias for the 2D array
@@ -116,19 +122,27 @@ fn print_grid_grid(grids: &Vec<LifeGrid>, width: usize) {
     }
 }
 
-fn count_adjacent_cells(grid: &LifeGrid, x: &usize, y: &usize, wrap: bool) -> Range<i32> {
+fn count_adjacent_cells(
+    grid: &LifeGrid,
+    x: &usize,
+    y: &usize,
+    edge_behavior: &EdgeBehavior,
+) -> Range<i32> {
     let (mut min_total, mut max_total) = (0, 0);
     for dx in -1..=1 {
         for dy in -1..=1 {
             if !(dx == 0 && dy == 0) {
                 let (nx, ny): (i32, i32) = (*x as i32 + dx, *y as i32 + dy);
-                let cell_value = if wrap {
-                    grid[(nx as usize + SIZE) % SIZE][(ny as usize + SIZE) % SIZE]
-                } else {
-                    if nx < 0 || ny < 0 || nx >= DIM || ny >= DIM {
-                        CellState::Dead
-                    } else {
-                        grid[nx as usize][ny as usize]
+                let cell_value = match edge_behavior {
+                    EdgeBehavior::Wrap => {
+                        grid[(nx as usize + SIZE) % SIZE][(ny as usize + SIZE) % SIZE]
+                    }
+                    _ => {
+                        if nx < 0 || ny < 0 || nx >= DIM || ny >= DIM {
+                            CellState::Dead
+                        } else {
+                            grid[nx as usize][ny as usize]
+                        }
                     }
                 };
                 let (min_add, max_add) = match cell_value {
@@ -144,11 +158,11 @@ fn count_adjacent_cells(grid: &LifeGrid, x: &usize, y: &usize, wrap: bool) -> Ra
     min_total..max_total
 }
 
-fn simulate_grid(grid: &LifeGrid, wrap: bool) -> LifeGrid {
+fn simulate_grid(grid: &LifeGrid, edge_behavior: &EdgeBehavior) -> LifeGrid {
     let mut next_grid = [[CellState::Undetermined; SIZE]; SIZE];
     for x in 0..SIZE {
         for y in 0..SIZE {
-            let count_range = count_adjacent_cells(grid, &x, &y, wrap);
+            let count_range = count_adjacent_cells(grid, &x, &y, edge_behavior);
             // println!("{}", adjoin(to_str(&grid), adjoin(to_str(&next_grid), to_str_marked(&next_grid, x, y))));
             // println!("");
             next_grid[x][y] = match grid[x][y] {
@@ -206,7 +220,7 @@ fn is_consistent(grid_a: &LifeGrid, grid_b: &LifeGrid) -> bool {
 fn explore_possible_prior_grids(
     present_grid: &LifeGrid,
     skip_lonely_cells: bool,
-    wrap: bool,
+    edge_behavior: &EdgeBehavior,
     yield_amount: Option<usize>,
 ) -> Vec<LifeGrid> {
     let mut stack: Vec<(LifeGrid, i32, i32)> = Vec::new();
@@ -214,8 +228,9 @@ fn explore_possible_prior_grids(
     let mut results = Vec::new();
     let mut explored_grids = 0;
     while let Some((possible_past_grid, x, y)) = stack.pop() {
+        let at_edge = x == 0 || y == 0 || x == DIM - 1 || y == DIM - 1;
         explored_grids += 1;
-        let simulated_present_grid = simulate_grid(&possible_past_grid, wrap);
+        let simulated_present_grid = simulate_grid(&possible_past_grid, edge_behavior);
         // print_grid_grid(&stack.iter().map(|(g,_,_)| g).collect(), 20);
         // println!("{}", adjoin(to_str(&present_grid), adjoin(to_str(&simulated_present_grid), adjoin(to_str(&possible_past_grid), to_str_marked(&possible_past_grid, x as usize, y as usize)))));
         // println!("");
@@ -234,8 +249,12 @@ fn explore_possible_prior_grids(
             }
         } else {
             let current_cell_present_state = present_grid[x as usize][y as usize];
-            let living_range =
-                count_adjacent_cells(&possible_past_grid, &(x as usize), &(y as usize), wrap);
+            let living_range = count_adjacent_cells(
+                &possible_past_grid,
+                &(x as usize),
+                &(y as usize),
+                edge_behavior,
+            );
             /*
              * If the current cell is alive:
              *  - it could only have been alive last step if it had either 2 or 3 living neighbors
@@ -258,7 +277,7 @@ fn explore_possible_prior_grids(
                                 &present_grid,
                                 &(x as usize),
                                 &(y as usize),
-                                wrap,
+                                edge_behavior,
                             )
                             .end > 0),
                     true,
@@ -269,12 +288,16 @@ fn explore_possible_prior_grids(
             let total_index = x + y * DIM;
             let next_index = total_index + 1;
             let (next_x, next_y) = (next_index % DIM, next_index / DIM);
-            for i in 0..2 {
-                if check[i] {
-                    let mut new_grid = possible_past_grid.clone();
-                    new_grid[x as usize][y as usize] = [CellState::Alive, CellState::Dead][i];
-                    stack.push((new_grid, next_x, next_y));
+            for i in (0..2).filter(|i| {
+                if *i == 0 && *edge_behavior == EdgeBehavior::Avoid && at_edge {
+                    false
+                } else {
+                    check[*i as usize]
                 }
+            }) {
+                let mut new_grid = possible_past_grid.clone();
+                new_grid[x as usize][y as usize] = [CellState::Alive, CellState::Dead][i];
+                stack.push((new_grid, next_x, next_y));
             }
         }
     }
@@ -286,8 +309,7 @@ fn explore_possible_prior_grids(
 fn explore_possible_prior_grids_parallel(
     present_grid: &LifeGrid,
     skip_lonely_cells: bool,
-    wrap: bool,
-    shy_from_edges: bool,
+    edge_behavior: &EdgeBehavior,
 ) -> Vec<LifeGrid> {
     let mut stack: Vec<LifeGrid> = Vec::new();
     stack.push([[CellState::Undetermined; SIZE]; SIZE]);
@@ -300,12 +322,13 @@ fn explore_possible_prior_grids_parallel(
         stack = stack
             .par_iter()
             .map(|possible_past_grid| {
-                let simulated_present_grid = simulate_grid(&possible_past_grid, wrap);
+                let simulated_present_grid = simulate_grid(&possible_past_grid, edge_behavior);
                 if !is_consistent(&simulated_present_grid, present_grid) {
                     vec![]
                 } else {
                     let current_cell_present_state = present_grid[x][y];
-                    let living_range = count_adjacent_cells(&possible_past_grid, &x, &y, wrap);
+                    let living_range =
+                        count_adjacent_cells(&possible_past_grid, &x, &y, edge_behavior);
 
                     let check = match current_cell_present_state {
                         CellState::Alive => [
@@ -315,7 +338,9 @@ fn explore_possible_prior_grids_parallel(
                         CellState::Dead => [
                             (overlap(&living_range, &(0..1)) || overlap(&living_range, &(4..8)))
                                 && (!skip_lonely_cells
-                                    || count_adjacent_cells(&present_grid, &x, &y, wrap).end > 0),
+                                    || count_adjacent_cells(&present_grid, &x, &y, edge_behavior)
+                                        .end
+                                        > 0),
                             true,
                         ],
                         CellState::Undetermined => [true, true],
@@ -323,7 +348,7 @@ fn explore_possible_prior_grids_parallel(
 
                     (0..2)
                         .filter(|i| {
-                            if *i == 0 && shy_from_edges && at_edge {
+                            if *i == 0 && *edge_behavior == EdgeBehavior::Avoid && at_edge {
                                 false
                             } else {
                                 check[*i as usize]
@@ -372,13 +397,14 @@ fn shape_radius(grid: &LifeGrid) -> usize {
                     .rfind(|(_, cell)| **cell == CellState::Alive)
                     .map(|(n, _)| n),
             )
-        }).collect();
+        })
+        .collect();
     let width = match (
-        row_spans.iter().map(|(l, _)| l).filter_map(|x|*x).min(),
-        row_spans.iter().map(|(_, r)| r).filter_map(|x|*x).max(),
+        row_spans.iter().map(|(l, _)| l).filter_map(|x| *x).min(),
+        row_spans.iter().map(|(_, r)| r).filter_map(|x| *x).max(),
     ) {
         (Some(left), Some(right)) => right - left + 1,
-        _ => 0
+        _ => 0,
     };
     let rows_with_cells: Vec<(usize, bool)> = grid
         .iter()
@@ -401,7 +427,12 @@ fn shape_radius(grid: &LifeGrid) -> usize {
     width * height
 }
 
-fn sim_backwards(starting_grid: &LifeGrid, steps: usize) -> Option<LifeGrid> {
+fn sim_backwards(
+    starting_grid: &LifeGrid,
+    steps: usize,
+    skip_lonely_cells: bool,
+    edge_behavior: &EdgeBehavior
+) -> Option<LifeGrid> {
     let mut state_stack: Vec<Vec<LifeGrid>> = vec![vec![*starting_grid]];
     while state_stack.len() < steps {
         let step = state_stack.len();
@@ -417,9 +448,11 @@ fn sim_backwards(starting_grid: &LifeGrid, steps: usize) -> Option<LifeGrid> {
                     print_life_grid(&grid);
                     println!("Simulating step {step}");
                     let mut results =
-                        explore_possible_prior_grids_parallel(&grid, true, false, true);
+                        explore_possible_prior_grids_parallel(&grid, skip_lonely_cells, edge_behavior);
                     if !results.is_empty() {
-                        results.sort_by_cached_key(|grid| Reverse(shape_radius(&grid)));
+                        results.sort_by_cached_key(|grid| {
+                            Reverse((num_cells(&grid), shape_radius(&grid)))
+                        });
                         // print_grid_grid(&results, 5);
                         state_stack.push(grid_set);
                         state_stack.push(results);
@@ -441,13 +474,17 @@ fn sim_backwards(starting_grid: &LifeGrid, steps: usize) -> Option<LifeGrid> {
 fn main() {
     let mut grid: LifeGrid = [[CellState::Dead; SIZE]; SIZE];
     let glider = &[(0, 2), (1, 0), (1, 2), (2, 1), (2, 2)];
-    let glider_2 = &[(0, 0), (1, 1), (1, 2), (2, 0), (2, 1)];
     let oscillator = &[(0, 0), (0, 1), (0, 2)];
-    for (x, y) in glider {
-        grid[*x + 15][*y + 15] = CellState::Alive
+    let undeath = &[(0, 0), (0, 1)];
+    let dot = &[(0, 0)];
+    for (x, y) in dot {
+        grid[*x + 3][*y + 3] = CellState::Alive
     }
-    let back_sim = sim_backwards(&grid, 35).unwrap();
-    print_life_grid(&back_sim);
+    let back_sim = sim_backwards(&grid, 8, true, &EdgeBehavior::Avoid);
+    match back_sim {
+        Some(end_grid) => print_life_grid(&end_grid),
+        None => println!("Unable to reach final backstep"),
+    }
     // let grids = explore_possible_prior_grids_parallel(&grid, true, false);
     // print_grid_grid(&grids, 100/DIM as usize);
 }
