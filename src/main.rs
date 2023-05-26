@@ -463,8 +463,6 @@ fn sim_backwards_parallel(
         step += 1;
     }
     stack.sort_by_cached_key(|grid| (num_cells(&grid), shape_radius(&grid)));
-    let num_grids = stack.len();
-    println!("There are {num_grids} grids at step {step}");
     (stack, step)
 }
 
@@ -531,7 +529,7 @@ fn main() {
     for (x, y) in dot {
         grid[*x + 3][*y + 3] = CellState::Alive
     }
-    let (back_sim, step_count) = sim_backwards_parallel(&grid, 10, true, &EdgeBehavior::Avoid);
+    let (back_sim, step_count) = sim_backwards_parallel(&grid, 20, true, &EdgeBehavior::Avoid);
     println!("Grid at step {step_count}");
     print_grid_grid(&back_sim, 100 / SIZE);
     // let grids = explore_possible_prior_grids_parallel(&grid, true, false);
